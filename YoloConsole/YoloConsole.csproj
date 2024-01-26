@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="imagenet_classes.txt" />
+    <None Remove="SampleImages\bus.jpg" />
+    <None Remove="SampleImages\flamingo.jpg" />
+    <None Remove="yolov8m-cls.onnx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="imagenet_classes.txt" />
+    <EmbeddedResource Include="SampleImages\bus.jpg" />
+    <EmbeddedResource Include="SampleImages\flamingo.jpg" />
+    <EmbeddedResource Include="yolov8m-cls.onnx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.16.3" />
+    <PackageReference Include="SkiaSharp" Version="2.88.7" />
+  </ItemGroup>
+
+</Project>
