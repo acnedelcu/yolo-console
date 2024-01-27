@@ -5,156 +5,148 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace YoloConsole
 {
     public class Program
     {
-        const int DimBatchSize = 1;
-        const int DimNumberOfChannels = 3;
-        const int ImageSizeX = 640;
-        const int ImageSizeY = 640;
-        const string ModelInputName = "images";
-        const string ModelOutputName = "output0";
+        private MemoryStream image;
+        private List<string> labels;
+        private InferenceSession session;
 
-        byte[] _model;
-        byte[] _sampleImage;
-        List<string> _labels;
-        InferenceSession _session;
+        private const int DimBatchSize = 1;
+        private const int DimNumberOfChannels = 3;
+        private const int TargetWidth = 640;
+        private const string ModelInputName = "images";
+        private const string ModelOutputName = "output0";
+        private const int TargetHeight = 640;
 
-        public async Task ProcessInputData()
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        public Program()
+        {
+            this.image = new MemoryStream();
+            ReadInputImage("bus.jpg");
+
+            this.labels = ReadLabels();
+            this.session = ReadModel();
+        }
+
+        /// <summary>
+        /// Reads the image to be classified and copies the stream contents to <see cref="image"/>
+        /// </summary>
+        /// <param name="imageName">The name of the image, with extension</param>
+        /// <exception cref="ArgumentNullException">Image not found</exception>
+        public void ReadInputImage(string imageName)
+        {
+            if (!imageName.Contains('.'))  //TODO update
+            {
+                throw new Exception("The name of the image does not have an extension!");
+            }
+
+            var assembly = GetType().Assembly;
+            using var imageStream = assembly.GetManifestResourceStream($"{assembly.GetName().Name}.SampleImages.{imageName}");
+            _ = imageStream ?? throw new ArgumentNullException(nameof(imageStream));
+            imageStream.CopyTo(image);
+        }
+
+        /// <summary>
+        /// Read the labels from the file
+        /// </summary>
+        public List<string> ReadLabels()
         {
             var assembly = GetType().Assembly;
-
-            // Get labels
             using var labelsStream = assembly.GetManifestResourceStream($"{assembly.GetName().Name}.imagenet_classes.txt");
+
+            if (labelsStream == null || labelsStream.Length == 0)
+            {
+                throw new ArgumentNullException(nameof(labelsStream));
+            }
+
             using var reader = new StreamReader(labelsStream);
 
-            string text = await reader.ReadToEndAsync();
-            _labels = text.Split(new string[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            string text = reader.ReadToEnd();
+            List<string> labels = text.Split(new string[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            return labels;
+        }
 
-            // Get model and create session
+        /// <summary>
+        /// Returns a new <see cref="InferenceSession"/> using the .onnx file
+        /// </summary>
+        public InferenceSession ReadModel()
+        {
+            var assembly = GetType().Assembly;
             using var modelStream = assembly.GetManifestResourceStream($"{assembly.GetName().Name}.yolov8m-cls.onnx");
-            using var modelMemoryStream = new MemoryStream();
 
-            modelStream.CopyTo(modelMemoryStream);
-            _model = modelMemoryStream.ToArray();
-            _session = new InferenceSession(_model);
-
-            // Get sample image
-            using var sampleImageStream = assembly.GetManifestResourceStream($"{assembly.GetName().Name}.SampleImages.bus.jpg");
-            using var sampleImageMemoryStream = new MemoryStream();
-
-            sampleImageStream.CopyTo(sampleImageMemoryStream);
-            _sampleImage = sampleImageMemoryStream.ToArray();
-        }
-
-        public Task<string> GetClassificationAsync()
-        {
-            var input = GetImageTensor(_sampleImage);
-
-            using var results = _session.Run(new List<NamedOnnxValue>
+            if (modelStream == null || modelStream.Length == 0)
             {
-                NamedOnnxValue.CreateFromTensor(ModelInputName, input)
-            });
-
-            var output = results.FirstOrDefault(i => i.Name == ModelOutputName);
-            var scores = output.AsTensor<float>().ToList();
-            //double s = 0;
-            //for (int i = 0; i < scores.Count; i++)
-            //{
-            //    s += scores[i];
-            //}
-            var highestScore = scores.Max();
-            var highestScoreIndex = scores.IndexOf(highestScore);
-            var label = _labels.ElementAt(highestScoreIndex);
-            return Task.FromResult(label);
-        }
-
-        private byte[] ResizeImage(byte[] image)
-        {
-            using var sourceBitmap = SKBitmap.Decode(image);
-            byte[] pixels = sourceBitmap.Bytes;
-
-            ////Resize
-            if (sourceBitmap.Width != ImageSizeX || sourceBitmap.Height != ImageSizeY)
-            {
-                float ratio = (float)Math.Min(ImageSizeX, ImageSizeY) / Math.Min(sourceBitmap.Width, sourceBitmap.Height);
-
-                using SKBitmap scaledBitmap = sourceBitmap.Resize(new SKImageInfo(
-                    (int)(ratio * sourceBitmap.Width),
-                    (int)(ratio * sourceBitmap.Height)),
-                    SKFilterQuality.Medium);
-
-                var horizontalCrop = scaledBitmap.Width - ImageSizeX;
-                var verticalCrop = scaledBitmap.Height - ImageSizeY;
-                var leftOffset = horizontalCrop == 0 ? 0 : horizontalCrop / 2;
-                var topOffset = verticalCrop == 0 ? 0 : verticalCrop / 2;
-
-                var cropRect = SKRectI.Create(
-                    new SKPointI(leftOffset, topOffset),
-                    new SKSizeI(ImageSizeX, ImageSizeY));
-
-                using SKImage currentImage = SKImage.FromBitmap(scaledBitmap);
-                //SaveImage(currentImage.Encode().ToArray(), "currentImage.jpg");
-                using SKImage croppedImage = currentImage.Subset(cropRect);
-                //SaveImage(croppedImage.Encode().ToArray(), "croppedImage.jpg");
-                using SKBitmap croppedBitmap = SKBitmap.FromImage(croppedImage);
-
-                pixels = croppedBitmap.Bytes;
+                throw new ArgumentNullException(nameof(modelStream));
             }
-            return pixels;
+
+            //copy to a MemoryStream
+            using MemoryStream stream = new();
+            modelStream.CopyTo(stream);
+            return new InferenceSession(stream.ToArray());
         }
 
-        private DenseTensor<float> GetImageTensor(byte[] image)
+        /// <summary>
+        /// Resizes <see cref="image"/> to the specified <see cref="TargetWidth"/> and <see cref="TargetHeight"/>
+        /// </summary>
+        /// <returns>The resized image</returns>
+        public byte[] GetResizedImage()
         {
-            using (var sourceBitmap = SKBitmap.Decode(image))
+            byte[] sourceImage = image.ToArray();
+
+            using SKBitmap sourceBitmap = SKBitmap.Decode(sourceImage);
+            if (sourceBitmap.Width != TargetWidth || sourceBitmap.Height != TargetHeight)
             {
-                byte[] pixels = ResizeImage(image);
-                //normalize
-                var bytesPerPixel = sourceBitmap.BytesPerPixel;
-                var rowLength = ImageSizeX * bytesPerPixel;
-                var channelLength = ImageSizeX * ImageSizeY;
-                var channelData = new float[channelLength * 3];
-                var channelDataIndex = 0;
+                float ratio = (float)Math.Min(TargetWidth, TargetHeight) / Math.Min(sourceBitmap.Width, sourceBitmap.Height);
 
-                for (int y = 0; y < ImageSizeY; y++)
-                {
-                    var rowOffset = y * rowLength;
-                    for (int x = 0, columnOffset = 0; x < ImageSizeX; x++, columnOffset += bytesPerPixel)
-                    {
-                        var pixelOffset = rowOffset + columnOffset;
+                SKImageInfo info = new((int)(ratio * sourceBitmap.Width), (int)(ratio * sourceBitmap.Height));
+                using SKBitmap scaledBitmap = sourceBitmap.Resize(info, SKFilterQuality.Medium);
 
-                        var pixelR = pixels[pixelOffset];
-                        var pixelG = pixels[pixelOffset + 1];
-                        var pixelB = pixels[pixelOffset + 2];
+                int horizontalCrop = scaledBitmap.Width - TargetWidth;
+                int verticalCrop = scaledBitmap.Height - TargetHeight;
+                int leftOffset = horizontalCrop == 0 ? 0 : horizontalCrop / 2;
+                int topOffset = verticalCrop == 0 ? 0 : verticalCrop / 2;
+                var cropRect = SKRectI.Create(new SKPointI(leftOffset, topOffset), new SKSizeI(TargetWidth, TargetHeight));
 
-                        var rChannelIndex = channelDataIndex;
-                        var gChannelIndex = channelDataIndex + channelLength;
-                        var bChannelIndex = channelDataIndex + (channelLength * 2);
+                using SKImage croppedImage = SKImage.FromBitmap(scaledBitmap).Subset(cropRect);
 
-                        channelData[rChannelIndex] = (pixelR / 255f - 0.485f) / 0.229f;
-                        channelData[gChannelIndex] = (pixelG / 255f - 0.456f) / 0.224f;
-                        channelData[bChannelIndex] = (pixelB / 255f - 0.406f) / 0.225f;
-
-                        channelDataIndex++;
-                    }
-                }
-
-                // create tensor
-                var input = new DenseTensor<float>(channelData, new[]
-                {
-                DimBatchSize,
-                DimNumberOfChannels,
-                ImageSizeX,
-                ImageSizeY
-            });
-
-                return input;
+                //SaveImage(croppedImage.Encode().ToArray(), "resizedImage.jpg");
+                return croppedImage.Encode(SKEncodedImageFormat.Jpeg, 100).ToArray();
             }
+            return sourceImage;
         }
 
+        /// <summary>
+        /// Normalized the provided image
+        /// </summary>
+        /// <param name="image">The image to be normalized</param>
+        /// <returns>The normalized, concatenated values for the RGB channels</returns>
+        public float[] NormalizeImage(byte[] image)
+        {
+            SKBitmap bitmap = SKBitmap.Decode(image);
+            var pixels = bitmap.Pixels;
+
+            float[] rValues = new float[pixels.Length];
+            float[] gValues = new float[pixels.Length];
+            float[] bValues = new float[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                rValues[i] = pixels[i].Red / 255f;
+                gValues[i] = pixels[i].Green / 255f;
+                bValues[i] = pixels[i].Blue / 255f;
+            }
+            return rValues.Concat(gValues).Concat(bValues).ToArray();
+        }
+
+        /// <summary>
+        /// Saves the image with the specified image name
+        /// </summary>
+        /// <param name="image">The image</param>
+        /// <param name="imageName">The name of the image with extension</param>
         private void SaveImage(byte[] image, string imageName)
         {
             using (var ms = new MemoryStream(image))
@@ -166,12 +158,43 @@ namespace YoloConsole
             }
         }
 
-        public static async Task Main()
+        /// <summary>
+        /// Classifies the image
+        /// </summary>
+        /// <param name="normalizedImageData">The normalized image to be classified</param>
+        /// <returns>The classification</returns>
+        public string GetClassification(float[] normalizedImageData)
+        {
+            var imageTensor = new DenseTensor<float>(normalizedImageData, new[]
+                {
+                DimBatchSize,
+                DimNumberOfChannels,
+                TargetWidth,
+                TargetHeight
+            });
+
+            using var results = this.session.Run(new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor(ModelInputName, imageTensor)
+            });
+
+            var output = results.FirstOrDefault(i => i.Name == ModelOutputName);
+            _ = output ?? throw new ArgumentNullException(nameof(output));
+
+            List<float> scores = output.AsTensor<float>().ToList();
+            float highestScore = scores.Max();
+            int highestScoreIndex = scores.IndexOf(highestScore);
+            string label = this.labels.ElementAt(highestScoreIndex);
+            return label;
+        }
+
+        private static void Main(string[] args)
         {
             Program p = new();
-            await p.ProcessInputData();
-            string result = await p.GetClassificationAsync();
-            Console.WriteLine($"The result is: {result}");
+            byte[] resizedImage = p.GetResizedImage();
+            float[] normalizedImage = p.NormalizeImage(resizedImage);
+            string result = p.GetClassification(normalizedImage);
+            Console.WriteLine(result);
         }
     }
 }
