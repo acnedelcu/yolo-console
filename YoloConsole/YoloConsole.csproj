@@ -11,6 +11,7 @@
     <None Remove="imagenet_classes.txt" />
     <None Remove="SampleImages\bus.jpg" />
     <None Remove="SampleImages\flamingo.jpg" />
+    <None Remove="SampleImages\laptop.jpg" />
     <None Remove="yolov8m-cls.onnx" />
   </ItemGroup>
 
@@ -18,6 +19,7 @@
     <EmbeddedResource Include="imagenet_classes.txt" />
     <EmbeddedResource Include="SampleImages\bus.jpg" />
     <EmbeddedResource Include="SampleImages\flamingo.jpg" />
+    <EmbeddedResource Include="SampleImages\laptop.jpg" />
     <EmbeddedResource Include="yolov8m-cls.onnx" />
   </ItemGroup>
 
